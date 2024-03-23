@@ -1,0 +1,80 @@
+version: '3'
+
+# This section defines all the networks we'll be connecting our containers to in our virtual infrastructure.
+networks:
+  app-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${APP_SUBNET} # Specify the subnet for the network
+
+# This section defines virtual volumes that our containers can mount
+# to store persistent data.
+volumes:
+  certs:
+
+# This section defines the secrets that our containers
+# can use to access sensitive information
+secrets:
+  flask_secret_key:
+    file: ${SECRET_PATH_FLASK_SECRET_KEY}
+
+# This section defines the containers that we will deploy in our virtual infrastructure
+services:
+  my-flask-app:
+    container_name: my-flask-app # This specifies the name of the container
+    restart: unless-stopped # This specifies that the container should restart unless it was stopped by the user
+    depends_on: # This specifies that the my-proxy container must be running before this container can start
+      - my-proxy
+    build: ./app # This specifies the context of the build
+    networks: # This specifies the networks to connect the container to
+      app-network:
+        ipv4_address: ${APP_IP} # Specify the IP address for the container
+    ports: # This specifies the port mapping for the container
+      - "${APP_PORT_MAPPING}:${APP_PORT}"
+    secrets: # This specifies the secrets to pass to the container
+      - flask_secret_key
+    environment: # This specifies the environment variables to pass to the container
+      - TZ=${INFRA_TZ}
+      - GID=${APP_GID}
+      - UID=${APP_UID}
+      - APP_PORT=${APP_PORT}
+      - APP_IP=${APP_IP}
+
+  # This is an NGINX container, set up as a reverse proxy for the Flask app.
+  my-proxy:
+    container_name: my-proxy
+    restart: unless-stopped
+    depends_on:
+      - certmanager
+    image: nginx:latest # This specifies the image to use for the container
+    networks:
+      app-network:
+        ipv4_address: ${PROXY_IP}
+    ports:
+      - "${PROXY_PORT_MAPPING}:${PROXY_PORT}"
+      - "${PROXY_PORT_TLS_MAPPING}:${PROXY_PORT_TLS}"
+    volumes: # This specifies the virtual docker volumes to mount to the container
+      - certs:/certs:ro # we mount "certs" as read-only on /certs
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro # we mount the nginx configuration file as read-only
+    environment:
+      - TZ=${INFRA_TZ}
+      - GID=$PROXY_GID}
+      - UID=${PROXY_UID}
+
+  # Certificate manager to make things easier
+  certmanager:
+    container_name: certmanager
+    restart: no
+    build: ./certmanager
+    networks:
+      app-network:
+        ipv4_address: ${CERTMANAGER_IP}
+    volumes:
+      - certs:/certs
+    environment:
+      - TZ=${INFRA_TZ}
+      - GID=$CERTMANAGER_GID}
+      - UID=${CERTMANAGER_UID}
+      - DOMAIN=${DOMAIN}
+      - EMAIL=${LE_EMAIL}
